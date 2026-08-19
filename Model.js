@@ -10,6 +10,12 @@ var PhaseWork = "work"
 var PhaseSnack = "snack"
 var DefaultExercises = ["Push-ups", "Pull-ups", "Air squats"]
 var IdleResetSeconds = 120
+var HistoryKeepDays = 30
+var DonutMaxSlices = 6
+var DonutMinPct = 3
+var ArcGapDeg = 1.5
+var WeekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+var MonthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 function finiteNumber(value, fallback) {
   var parsed = Number(value)
@@ -344,6 +350,284 @@ function formatTodayTotals(today) {
   return parts.join(" · ")
 }
 
+function formatReps(count) {
+  var n = Math.max(0, Math.round(finiteNumber(count, 0)))
+  return n === 1 ? "1 rep" : (n + " reps")
+}
+
+function hasTotals(totals) {
+  if (!totals) return false
+  for (var name in totals) {
+    if (Math.round(finiteNumber(totals[name], 0)) > 0) return true
+  }
+  return false
+}
+
+function parseDateKey(key) {
+  var parts = String(key || "").split("-")
+  if (parts.length !== 3) return null
+  var year = Number(parts[0])
+  var month = Number(parts[1])
+  var day = Number(parts[2])
+  if (!isFinite(year) || !isFinite(month) || !isFinite(day)) return null
+  var date = new Date(year, month - 1, day)
+  if (isNaN(date.getTime())) return null
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day)
+    return null
+  return date
+}
+
+function prevDateKey(key) {
+  var date = parseDateKey(key)
+  if (!date) return ""
+  date.setDate(date.getDate() - 1)
+  return dateKey(date.getTime())
+}
+
+function weekKeys(todayKey) {
+  if (!todayKey) return []
+  var keys = []
+  var key = todayKey
+  for (var i = 0; i < 7; i++) {
+    keys.unshift(key)
+    key = prevDateKey(key)
+    if (!key) break
+  }
+  return keys
+}
+
+function weekdayLabel(key) {
+  var date = parseDateKey(key)
+  return date ? WeekdayNames[date.getDay()] : ""
+}
+
+function formatDateLabel(key) {
+  var date = parseDateKey(key)
+  if (!date) return ""
+  return MonthNames[date.getMonth()] + " " + date.getDate()
+}
+
+function dayLabel(key, todayKey) {
+  if (!key) return ""
+  if (key === todayKey) return "Today"
+  return formatDateLabel(key)
+}
+
+function totalsSum(totals) {
+  var sum = 0
+  var source = totals || {}
+  for (var name in source) sum += Math.max(0, Math.round(finiteNumber(source[name], 0)) || 0)
+  return sum
+}
+
+function normalizeDayTotals(raw) {
+  if (!raw) return {}
+  if (raw.totals) return parseReps(raw.totals)
+  return parseReps(raw)
+}
+
+function normalizeDays(raw) {
+  var out = {}
+  if (!raw) return out
+  for (var key in raw) {
+    if (!parseDateKey(key)) continue
+    var totals = normalizeDayTotals(raw[key])
+    if (hasTotals(totals)) out[key] = totals
+  }
+  return out
+}
+
+function pruneDays(days, todayKey, keepDays) {
+  var source = normalizeDays(days)
+  var keep = Math.max(1, Math.round(finiteNumber(keepDays, HistoryKeepDays)))
+  if (!todayKey) return source
+  var cutoff = todayKey
+  for (var i = 1; i < keep; i++) {
+    var previous = prevDateKey(cutoff)
+    if (!previous) break
+    cutoff = previous
+  }
+  var out = {}
+  for (var key in source) {
+    if (key >= cutoff) out[key] = source[key]
+  }
+  return out
+}
+
+function syncHistory(days, today, nowMs) {
+  var nowKey = dateKey(nowMs)
+  var history = normalizeDays(days)
+  var current = today && today.date
+    ? { date: String(today.date), totals: parseReps(today.totals) }
+    : emptyToday(nowMs)
+  if (current.date && current.date !== nowKey) {
+    if (hasTotals(current.totals)) history[current.date] = current.totals
+    current = emptyToday(nowMs)
+  }
+  if (hasTotals(current.totals)) history[nowKey] = cloneObject(current.totals)
+  history = pruneDays(history, nowKey, HistoryKeepDays)
+  return {
+    days: history,
+    today: {
+      date: nowKey,
+      totals: history[nowKey] ? cloneObject(history[nowKey]) : {}
+    }
+  }
+}
+
+function mergeHistory(days, today, reps, nowMs) {
+  return syncHistory(days, mergeTotals(today, reps, nowMs), nowMs)
+}
+
+function totalsForDay(days, today, key) {
+  var todayKey = today && today.date ? String(today.date) : ""
+  if (!key || key === todayKey) return parseReps(today && today.totals)
+  var history = normalizeDays(days)
+  return history[key] ? cloneObject(history[key]) : {}
+}
+
+function weekTrend(days, today, todayKey) {
+  var key = todayKey || (today && today.date) || ""
+  var history = normalizeDays(days)
+  if (today && today.date && hasTotals(today.totals))
+    history[today.date] = parseReps(today.totals)
+  var keys = weekKeys(key)
+  var out = []
+  for (var i = 0; i < keys.length; i++) {
+    var day = keys[i]
+    out.push({
+      key: day,
+      count: totalsSum(history[day]),
+      label: weekdayLabel(day),
+      isToday: day === key
+    })
+  }
+  return out
+}
+
+function exerciseSlices(totals) {
+  var rows = todayTotalsList({ totals: totals })
+  rows.sort(function (a, b) {
+    if (b.count !== a.count) return b.count - a.count
+    if (a.name < b.name) return -1
+    if (a.name > b.name) return 1
+    return 0
+  })
+  var total = 0
+  for (var i = 0; i < rows.length; i++) total += rows[i].count
+  for (var j = 0; j < rows.length; j++)
+    rows[j].pct = total > 0 ? Math.round(100 * rows[j].count / total) : 0
+  return rows
+}
+
+function groupedExercises(rows, maxSlices, minPct) {
+  var list = rows || []
+  var max = typeof maxSlices === "number" ? maxSlices : DonutMaxSlices
+  var floor = typeof minPct === "number" ? minPct : DonutMinPct
+  var total = 0
+  for (var j = 0; j < list.length; j++) total += Number(list[j].count) || 0
+  var head = []
+  var tailCount = 0
+  for (var i = 0; i < list.length; i++) {
+    var pct = total > 0 ? (Number(list[i].count) || 0) / total * 100 : 0
+    if (head.length < max - 1 && pct >= floor) head.push(list[i])
+    else tailCount += Number(list[i].count) || 0
+  }
+  if (tailCount > 0) {
+    head.push({
+      name: "Other",
+      count: tailCount,
+      pct: total > 0 ? Math.round(100 * tailCount / total) : 0
+    })
+  }
+  return head
+}
+
+function hexToHsl(hex) {
+  var raw = String(hex || "").replace(/^\s+|\s+$/g, "")
+  var m6 = /^#?([0-9a-fA-F]{6})$/.exec(raw)
+  var m8 = /^#?([0-9a-fA-F]{8})$/.exec(raw)
+  var digits = m6 ? m6[1] : (m8 ? m8[1].slice(2) : "")
+  if (!digits) return { h: 0, s: 0, l: 60 }
+  var n = parseInt(digits, 16)
+  var r = ((n >> 16) & 255) / 255
+  var g = ((n >> 8) & 255) / 255
+  var b = (n & 255) / 255
+  var max = Math.max(r, g, b)
+  var min = Math.min(r, g, b)
+  var h = 0
+  var s = 0
+  var l = (max + min) / 2
+  if (max !== min) {
+    var d = max - min
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+  }
+  return { h: h, s: s * 100, l: l * 100 }
+}
+
+function hslToHex(h, s, l) {
+  h = ((h % 360) + 360) % 360
+  s /= 100
+  l /= 100
+  var c = (1 - Math.abs(2 * l - 1)) * s
+  var x = c * (1 - Math.abs((h / 60) % 2 - 1))
+  var m = l - c / 2
+  var r = 0
+  var g = 0
+  var b = 0
+  if (h < 60) { r = c; g = x }
+  else if (h < 120) { r = x; g = c }
+  else if (h < 180) { g = c; b = x }
+  else if (h < 240) { g = x; b = c }
+  else if (h < 300) { r = x; b = c }
+  else { r = c; b = x }
+  function ch(v) {
+    var t = Math.max(0, Math.min(255, Math.round((v + m) * 255)))
+    return (t < 16 ? "0" : "") + t.toString(16)
+  }
+  return "#" + ch(r) + ch(g) + ch(b)
+}
+
+function sliceColors(count, accentHex) {
+  var base = hexToHsl(accentHex)
+  var grayRamp = [50, 70, 32, 82, 40, 62]
+  var out = []
+  for (var i = 0; i < count; i++) {
+    var h = base.h + i * 38
+    var l = base.l
+    if (base.s < 12) l = grayRamp[i % grayRamp.length]
+    else if (i % 2 === 1) l = Math.max(32, Math.min(80, base.l - 14))
+    out.push(hslToHex(h, base.s, l))
+  }
+  return out
+}
+
+function arcSegments(items) {
+  var list = items || []
+  var total = 0
+  for (var i = 0; i < list.length; i++) total += Math.max(0, Number(list[i].count) || 0)
+  var gap = list.length > 1 ? ArcGapDeg : 0
+  var angle = -90
+  var out = []
+  for (var j = 0; j < list.length; j++) {
+    var frac = total > 0 ? (Number(list[j].count) || 0) / total : 0
+    var sweep = j < list.length - 1 ? Math.max(0, frac * 360 - gap) : frac * 360
+    out.push({
+      name: list[j].name,
+      count: list[j].count,
+      pct: list[j].pct,
+      startAngle: angle,
+      sweepAngle: sweep
+    })
+    angle += frac * 360
+  }
+  return out
+}
+
 function overlayStep(status, phase) {
   if (status === StatusPicking) return "pick"
   if (status === StatusLogging) return "log"
@@ -417,6 +701,7 @@ function emptyDocument(nowMs) {
     version: StateVersion,
     exercises: defaultExercises(),
     today: emptyToday(nowMs),
+    days: {},
     timer: stoppedState({}, nowMs),
     selected: []
   }
@@ -427,12 +712,13 @@ function parseDocument(raw, config, nowMs) {
   var source = raw || {}
   var exercises = normalizeExercises(source.exercises)
   var selected = normalizeSelected(source.selected, exercises)
-  var today = rollToday(source.today, now)
+  var synced = syncHistory(source.days, source.today, now)
   var recovered = recoverInterrupted(source.timer, config, now)
   return {
     version: StateVersion,
     exercises: exercises,
-    today: today,
+    today: synced.today,
+    days: synced.days,
     timer: recovered.state,
     selected: selected,
     notify: recovered.notify
@@ -441,10 +727,12 @@ function parseDocument(raw, config, nowMs) {
 
 function serializeDocument(doc, nowMs) {
   var now = finiteNumber(nowMs, Date.now())
+  var synced = syncHistory(doc && doc.days, doc && doc.today, now)
   return {
     version: StateVersion,
     exercises: normalizeExercises(doc && doc.exercises),
-    today: rollToday(doc && doc.today, now),
+    today: synced.today,
+    days: synced.days,
     timer: serializableTimer((doc && doc.timer) || stoppedState({}, now), now),
     selected: normalizeSelected(doc && doc.selected, doc && doc.exercises)
   }
@@ -462,6 +750,9 @@ if (typeof module !== "undefined") {
     PhaseSnack: PhaseSnack,
     DefaultExercises: DefaultExercises,
     IdleResetSeconds: IdleResetSeconds,
+    HistoryKeepDays: HistoryKeepDays,
+    DonutMaxSlices: DonutMaxSlices,
+    DonutMinPct: DonutMinPct,
     normalizeConfig: normalizeConfig,
     durationSeconds: durationSeconds,
     phaseLabel: phaseLabel,
@@ -488,6 +779,23 @@ if (typeof module !== "undefined") {
     mergeTotals: mergeTotals,
     todayTotalsList: todayTotalsList,
     formatTodayTotals: formatTodayTotals,
+    formatReps: formatReps,
+    prevDateKey: prevDateKey,
+    weekKeys: weekKeys,
+    weekdayLabel: weekdayLabel,
+    formatDateLabel: formatDateLabel,
+    dayLabel: dayLabel,
+    totalsSum: totalsSum,
+    normalizeDays: normalizeDays,
+    pruneDays: pruneDays,
+    syncHistory: syncHistory,
+    mergeHistory: mergeHistory,
+    totalsForDay: totalsForDay,
+    weekTrend: weekTrend,
+    exerciseSlices: exerciseSlices,
+    groupedExercises: groupedExercises,
+    sliceColors: sliceColors,
+    arcSegments: arcSegments,
     overlayStep: overlayStep,
     overlayOpen: overlayOpen,
     recoverInterrupted: recoverInterrupted,

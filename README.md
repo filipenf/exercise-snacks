@@ -4,7 +4,8 @@ A work timer for the [Omarchy](https://omarchy.org/) bar. When the interval
 ends, a popup asks you to pick a snack — push-ups, pull-ups, air squats —
 then runs a two-minute timer and lets you log how many you did.
 
-Today's totals stay on the Timer tab. The Learn tab has a tip of the day and
+Today's totals stay on the Timer tab. The Stats tab has a donut of today's
+exercises and a seven-day history. The Learn tab has a tip of the day and
 links to Dr. Rhonda Patrick's FoundMyFitness posts on exercise snacks.
 
 ## Install
@@ -52,9 +53,13 @@ Skip on the overlay starts the next work interval without logging. Escape
 does the same on pick and log; during the snack it jumps to logging so you
 can record an early finish.
 
-The Learn tab (`n` with the panel open; `t` returns to Timer) has a rotating
-tip and links to FoundMyFitness. Those links open in the browser. The plugin
-does not fetch X.com.
+The Learn tab (`n` with the panel open; `t` returns to Timer, `s` opens
+Stats) has a rotating tip and links to FoundMyFitness. Those links open in
+the browser. The plugin does not fetch X.com.
+
+Stats shows today's logged snacks as a donut (click a day in the week strip
+to inspect it) and total reps for the past seven days. Days before this
+update have no history.
 
 ## Keyboard
 
@@ -73,8 +78,9 @@ omarchy bar plugin set filipenf.exercise-snacks snackSeconds 120 --json
 ```
 
 New values apply to the next interval. Add or remove snacks on the Timer tab.
-The catalog and today's totals live in
-`~/.local/state/omarchy/exercise-snacks.json` and reset at local midnight.
+The catalog, today's totals, and up to 30 days of history live in
+`~/.local/state/omarchy/exercise-snacks.json`. Today's log still resets at
+local midnight; previous days stay in `days`.
 
 ## Update
 
@@ -87,7 +93,7 @@ omarchy plugin update filipenf.exercise-snacks
 ```bash
 node --test tests/model.test.js
 omarchy plugin validate .
-qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml Overlay.qml Service.qml CircularProgress.qml
+qmllint -I "$OMARCHY_PATH/shell" BarWidget.qml Panel.qml Overlay.qml Service.qml CircularProgress.qml DonutRing.qml
 ```
 
 ## License

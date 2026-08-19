@@ -136,9 +136,100 @@ test("parseDocument restores timer, catalog, and today's log", () => {
   assert.deepEqual(parsed.exercises, ["Push-ups", "Lunges"])
   assert.deepEqual(parsed.selected, ["Lunges"])
   assert.equal(parsed.today.totals["Push-ups"], 8)
+  assert.equal(parsed.days[Model.dateKey(now)]["Push-ups"], 8)
   assert.equal(parsed.timer.status, Model.StatusRunning)
   assert.equal(parsed.notify, "")
   assert.equal(Model.serializeDocument(parsed, now).version, 1)
+})
+
+test("history keeps yesterday when today rolls over", () => {
+  const morning = Date.parse("2026-08-18T09:00:00")
+  const nextDay = Date.parse("2026-08-19T09:00:00")
+  const logged = Model.mergeHistory({}, null, { "Push-ups": 10, "Air squats": 20 }, morning)
+  assert.equal(logged.today.totals["Push-ups"], 10)
+  assert.equal(logged.days[Model.dateKey(morning)]["Air squats"], 20)
+
+  const rolled = Model.syncHistory(logged.days, logged.today, nextDay)
+  assert.equal(rolled.today.date, Model.dateKey(nextDay))
+  assert.deepEqual(rolled.today.totals, {})
+  assert.equal(rolled.days[Model.dateKey(morning)]["Push-ups"], 10)
+  assert.equal(rolled.days[Model.dateKey(nextDay)], undefined)
+
+  const later = Model.mergeHistory(rolled.days, rolled.today, { "Pull-ups": 5 }, nextDay)
+  assert.equal(later.today.totals["Pull-ups"], 5)
+  assert.equal(later.days[Model.dateKey(morning)]["Push-ups"], 10)
+})
+
+test("old state without days migrates today's log into history", () => {
+  const now = Date.parse("2026-08-19T12:00:00")
+  const parsed = Model.parseDocument({
+    today: { date: Model.dateKey(now), totals: { "Air squats": 40 } }
+  }, config, now)
+  assert.equal(parsed.days[Model.dateKey(now)]["Air squats"], 40)
+})
+
+test("pruneDays drops history older than the keep window", () => {
+  const today = "2026-08-19"
+  const days = {
+    "2026-07-01": { "Push-ups": 9 },
+    "2026-08-18": { "Push-ups": 4 },
+    "2026-08-19": { "Air squats": 40 }
+  }
+  const pruned = Model.pruneDays(days, today, 7)
+  assert.equal(pruned["2026-07-01"], undefined)
+  assert.equal(pruned["2026-08-18"]["Push-ups"], 4)
+  assert.equal(pruned["2026-08-19"]["Air squats"], 40)
+})
+
+test("weekTrend is seven days ending today, oldest first", () => {
+  const now = Date.parse("2026-08-19T12:00:00")
+  const todayKey = Model.dateKey(now)
+  const yesterday = Model.prevDateKey(todayKey)
+  const trend = Model.weekTrend({
+    [yesterday]: { "Push-ups": 12 },
+    [todayKey]: { "Air squats": 40 }
+  }, { date: todayKey, totals: { "Air squats": 40 } }, todayKey)
+
+  assert.equal(trend.length, 7)
+  assert.equal(trend[6].key, todayKey)
+  assert.equal(trend[6].count, 40)
+  assert.equal(trend[6].isToday, true)
+  assert.equal(trend[5].key, yesterday)
+  assert.equal(trend[5].count, 12)
+  assert.equal(trend[0].count, 0)
+  assert.equal(Model.weekdayLabel(todayKey).length, 3)
+})
+
+test("donut slices sort by count and fold the tail into Other", () => {
+  const slices = Model.exerciseSlices({
+    "Air squats": 40,
+    "Push-ups": 31,
+    "Neck stretch": 1
+  })
+  assert.equal(slices[0].name, "Air squats")
+  assert.equal(slices[0].count, 40)
+  assert.ok(slices[0].pct > slices[2].pct)
+
+  const grouped = Model.groupedExercises([
+    { name: "A", count: 100, pct: 70 },
+    { name: "B", count: 30, pct: 21 },
+    { name: "C", count: 8, pct: 6 },
+    { name: "D", count: 4, pct: 3 },
+    { name: "E", count: 1, pct: 1 }
+  ], 3, 5)
+  assert.equal(grouped.length, 3)
+  assert.equal(grouped[0].name, "A")
+  assert.equal(grouped[2].name, "Other")
+  assert.equal(grouped[2].count, 13)
+
+  const segs = Model.arcSegments(grouped)
+  assert.equal(segs.length, 3)
+  assert.ok(segs[0].sweepAngle > segs[2].sweepAngle)
+  assert.equal(Model.sliceColors(3, "#6ee7b7").length, 3)
+  assert.equal(Model.formatReps(1), "1 rep")
+  assert.equal(Model.formatReps(40), "40 reps")
+  assert.equal(Model.dayLabel("2026-08-19", "2026-08-19"), "Today")
+  assert.equal(Model.dayLabel("2026-08-18", "2026-08-19"), "Aug 18")
 })
 
 test("tip of the day is stable for a local date and walks the list", () => {

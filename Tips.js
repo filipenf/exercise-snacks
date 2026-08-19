@@ -35,7 +35,7 @@ var TIPS = [
 
 var LINKS = [
   {
-    label: "Exercise snacks topic",
+    label: "More on exercise snacks",
     url: "https://www.foundmyfitness.com/topics/exercise-snacks"
   },
   {

@@ -22,10 +22,58 @@ Panel {
 
   property string currentTab: "timer"
   property string draftName: ""
+  property string selectedDayKey: ""
   property int selectedAction: 0
   property bool cursorActive: true
   property var tip: Tips.tipOfTheDay(Date.now())
   property var learnLinks: Tips.links()
+  readonly property string todayKey: timerService && timerService.today ? String(timerService.today.date || "") : ""
+  readonly property string activeDayKey: selectedDayKey || todayKey
+  readonly property var activeTotals: timerService
+    ? Model.totalsForDay(timerService.days, timerService.today, root.activeDayKey)
+    : ({})
+  readonly property var groupedSlices: Model.groupedExercises(
+    Model.exerciseSlices(root.activeTotals),
+    Model.DonutMaxSlices,
+    Model.DonutMinPct
+  )
+  readonly property var donutSegments: Model.arcSegments(root.groupedSlices)
+  readonly property string accentHex: {
+    var c = root.activeColor
+    function ch(v) {
+      var t = Math.max(0, Math.min(255, Math.round(v * 255)))
+      return (t < 16 ? "0" : "") + t.toString(16)
+    }
+    return "#" + ch(c.r) + ch(c.g) + ch(c.b)
+  }
+  readonly property var sliceColors: Model.sliceColors(root.groupedSlices.length, root.accentHex)
+  readonly property var weekTrend: timerService ? timerService.weekTrend : []
+  readonly property int weekMax: {
+    var max = 0
+    var list = root.weekTrend || []
+    for (var i = 0; i < list.length; i++) max = Math.max(max, Number(list[i].count) || 0)
+    return max
+  }
+  readonly property int dayTotal: Model.totalsSum(root.activeTotals)
+  readonly property real ringSize: Style.space(116)
+  readonly property real legendMaxHeight: Style.space(140)
+
+  function sliceColor(index, alpha) {
+    var hex = String(root.sliceColors[index] || "").replace(/[#\s]/g, "")
+    if (hex.length >= 6) {
+      var r = parseInt(hex.substr(0, 2), 16) / 255
+      var g = parseInt(hex.substr(2, 2), 16) / 255
+      var b = parseInt(hex.substr(4, 2), 16) / 255
+      return Qt.rgba(r, g, b, alpha)
+    }
+    return Qt.rgba(root.activeColor.r, root.activeColor.g, root.activeColor.b, alpha)
+  }
+
+  function selectDay(key) {
+    if (!key) return
+    if (key === root.todayKey || root.selectedDayKey === key) root.selectedDayKey = ""
+    else root.selectedDayKey = key
+  }
 
   function open() {
     selectedAction = 0
@@ -36,6 +84,7 @@ Panel {
   }
 
   function close() {
+    selectedDayKey = ""
     controller.hide()
   }
 
@@ -81,7 +130,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(Style.space(470))
+    contentHeight: panel.fittedContentHeight(Style.space(500))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -100,6 +149,7 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
         if (text === "t") root.currentTab = "timer"
+        else if (text === "s") root.currentTab = "stats"
         else if (text === "n") root.currentTab = "learn"
       }
 
@@ -112,6 +162,7 @@ Panel {
           width: parent.width
           options: [
             { value: "timer", label: "Timer" },
+            { value: "stats", label: "Stats" },
             { value: "learn", label: "Learn" }
           ]
           value: root.currentTab
@@ -294,6 +345,219 @@ Panel {
               enabled: root.draftName.trim().length > 0
               onClicked: root.addDraftExercise()
             }
+          }
+        }
+
+        // ---- Stats tab
+        Column {
+          width: parent.width
+          spacing: Style.space(12)
+          visible: root.currentTab === "stats"
+
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(root.ringSize, legendScroll.height)
+
+            Item {
+              id: donutItem
+              width: root.ringSize
+              height: root.ringSize
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+
+              DonutRing {
+                anchors.fill: parent
+                segments: root.donutSegments
+                colors: root.sliceColors
+                trackColor: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
+                ringWidth: Style.space(14)
+              }
+
+              Column {
+                anchors.centerIn: parent
+                width: parent.width * 0.62
+                spacing: Style.space(1)
+
+                Text {
+                  width: parent.width
+                  text: Model.dayLabel(root.activeDayKey, root.todayKey)
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                  elide: Text.ElideRight
+                  horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                  width: parent.width
+                  text: Model.formatReps(root.dayTotal)
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  elide: Text.ElideRight
+                  horizontalAlignment: Text.AlignHCenter
+                }
+              }
+            }
+
+            Flickable {
+              id: legendScroll
+              anchors.left: donutItem.right
+              anchors.leftMargin: Style.space(16)
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              clip: true
+              contentWidth: width
+              contentHeight: legendList.implicitHeight
+              height: Math.min(legendList.implicitHeight, root.legendMaxHeight)
+              interactive: contentHeight > height
+              flickableDirection: Flickable.VerticalFlick
+              boundsBehavior: Flickable.StopAtBounds
+
+              Column {
+                id: legendList
+                width: parent.width - Style.space(8)
+                spacing: Style.space(5)
+
+                Text {
+                  visible: root.groupedSlices.length === 0
+                  width: parent.width
+                  text: "No snacks logged"
+                  color: root.foreground
+                  opacity: 0.4
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                Repeater {
+                  model: root.groupedSlices
+
+                  Item {
+                    required property var modelData
+                    required property int index
+                    width: legendList.width
+                    implicitHeight: Math.max(swatch.height, Math.max(sliceName.implicitHeight, sliceCount.implicitHeight))
+
+                    Rectangle {
+                      id: swatch
+                      width: Style.space(7)
+                      height: width
+                      radius: width / 2
+                      color: root.sliceColor(index, 1.0)
+                      anchors.left: parent.left
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                      id: sliceName
+                      text: String(modelData.name || "")
+                      color: root.foreground
+                      opacity: 0.7
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      elide: Text.ElideRight
+                      width: parent.width - sliceCount.implicitWidth - Style.space(16)
+                      anchors.left: swatch.right
+                      anchors.leftMargin: Style.space(6)
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                      id: sliceCount
+                      text: String(modelData.count || 0)
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          PanelSeparator { foreground: root.foreground }
+
+          PanelSectionHeader {
+            text: "Past 7 days"
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.space(6)
+
+            Repeater {
+              model: root.weekTrend
+
+              Column {
+                required property var modelData
+                readonly property bool isActive: modelData.key === root.activeDayKey
+                width: (parent.width - parent.spacing * 6) / 7
+                spacing: Style.space(3)
+
+                Item {
+                  id: trendSlot
+                  width: parent.width
+                  height: Style.space(42)
+
+                  MouseArea {
+                    id: trendSlotMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.selectDay(modelData.key)
+                  }
+
+                  Rectangle {
+                    width: parent.width * 0.42
+                    radius: Style.space(2)
+                    color: isActive ? root.sliceColor(0, 1.0) : root.sliceColor(0, 0.28)
+                    opacity: trendSlotMouse.containsMouse && !isActive ? 0.5 : 1.0
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    height: {
+                      if (modelData.count <= 0 || root.weekMax <= 0) return 3
+                      return Math.max(3, trendSlot.height * Number(modelData.count) / root.weekMax)
+                    }
+                  }
+                }
+
+                Text {
+                  text: modelData.label
+                  color: root.foreground
+                  opacity: isActive ? 1.0 : 0.5
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: isActive
+                  width: parent.width
+                  horizontalAlignment: Text.AlignHCenter
+                }
+
+                Rectangle {
+                  width: Style.space(3)
+                  height: width
+                  radius: width / 2
+                  color: root.sliceColor(0, 1.0)
+                  visible: isActive
+                  anchors.horizontalCenter: parent.horizontalCenter
+                }
+              }
+            }
+          }
+
+          Text {
+            width: parent.width
+            visible: root.weekMax <= 0
+            text: "Bars fill in as you log snacks. Click a day to see its split."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
         }
 

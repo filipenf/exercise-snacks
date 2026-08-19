@@ -24,6 +24,7 @@ Item {
   property var exercises: Model.normalizeExercises(null)
   property var selected: []
   property var today: Model.emptyDocument(Date.now()).today
+  property var days: ({})
   property var timerState: Model.stoppedState(config, Date.now())
   property double nowMs: Date.now()
   property double lastTickMs: 0
@@ -51,6 +52,7 @@ Item {
   readonly property string overlayStep: Model.overlayStep(status, phase)
   readonly property var todayRows: Model.todayTotalsList(today)
   readonly property string todaySummary: Model.formatTodayTotals(today)
+  readonly property var weekTrend: Model.weekTrend(days, today, today && today.date ? today.date : "")
 
   function configure(settings) {
     var next = Model.normalizeConfig(settings || {})
@@ -81,6 +83,7 @@ Item {
     exercises = parsed.exercises
     selected = parsed.selected
     today = parsed.today
+    days = parsed.days
     if (parsed.timer && parsed.timer.status === Model.StatusStopped)
       setTimer(Model.startWork(config, Date.now()), true)
     else
@@ -115,6 +118,7 @@ Item {
     var snapshot = Model.serializeDocument({
       exercises: exercises,
       today: today,
+      days: days,
       timer: timerState,
       selected: selected
     }, Date.now())
@@ -180,6 +184,11 @@ Item {
     syncOverlay()
   }
 
+  function applyHistory(synced) {
+    days = synced.days
+    today = synced.today
+  }
+
   function saveLog(reps) {
     if (!initialized) return
     var payload = {}
@@ -188,7 +197,7 @@ Item {
       var name = names[i]
       payload[name] = reps ? Number(reps[name] || 0) : 0
     }
-    today = Model.mergeTotals(today, payload, Date.now())
+    applyHistory(Model.mergeHistory(days, today, payload, Date.now()))
     selected = []
     setTimer(Model.startWork(config, Date.now()), true)
     lastTickMs = Date.now()
@@ -241,7 +250,10 @@ Item {
     if (!initialized || idleResetPending) return
     var now = Date.now()
     nowMs = now
-    today = Model.rollToday(today, now)
+    if (!today || today.date !== Model.dateKey(now)) {
+      applyHistory(Model.syncHistory(days, today, now))
+      persistDocument()
+    }
 
     if (!running) {
       lastTickMs = now
