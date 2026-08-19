@@ -84,7 +84,10 @@ Item {
     selected = parsed.selected
     today = parsed.today
     days = parsed.days
-    if (parsed.timer && parsed.timer.status === Model.StatusStopped)
+    if (parsed.timer && parsed.timer.phase === Model.PhaseWork
+        && Math.round(Number(parsed.timer.phaseDurationSec || 0)) !== config.workMinutes * 60)
+      setTimer(Model.startWork(config, Date.now()), true)
+    else if (parsed.timer && parsed.timer.status === Model.StatusStopped)
       setTimer(Model.startWork(config, Date.now()), true)
     else
       setTimer(parsed.timer, true)

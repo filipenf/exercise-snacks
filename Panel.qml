@@ -38,6 +38,10 @@ Panel {
     Model.DonutMinPct
   )
   readonly property var donutSegments: Model.arcSegments(root.groupedSlices)
+  readonly property var weekTrend: timerService ? timerService.weekTrend : []
+  readonly property var weekSeries: timerService
+    ? Model.weekSeries(timerService.days, timerService.today, root.todayKey)
+    : []
   readonly property string accentHex: {
     var c = root.activeColor
     function ch(v) {
@@ -46,8 +50,13 @@ Panel {
     }
     return "#" + ch(c.r) + ch(c.g) + ch(c.b)
   }
-  readonly property var sliceColors: Model.sliceColors(root.groupedSlices.length, root.accentHex)
-  readonly property var weekTrend: timerService ? timerService.weekTrend : []
+  readonly property var seriesColors: Model.sliceColors(Math.max(root.weekSeries.length, 1), root.accentHex)
+  readonly property var donutColors: {
+    var out = []
+    var segs = root.groupedSlices || []
+    for (var i = 0; i < segs.length; i++) out.push(root.hexForExercise(segs[i].name))
+    return out
+  }
   readonly property int weekMax: {
     var max = 0
     var list = root.weekTrend || []
@@ -57,9 +66,25 @@ Panel {
   readonly property int dayTotal: Model.totalsSum(root.activeTotals)
   readonly property real ringSize: Style.space(116)
   readonly property real legendMaxHeight: Style.space(140)
+  readonly property real weekBarHeight: Style.space(52)
+
+  function seriesIndex(name) {
+    var list = root.weekSeries || []
+    var key = String(name || "")
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].name || "") === key) return i
+    }
+    return -1
+  }
+
+  function hexForExercise(name) {
+    var idx = root.seriesIndex(name)
+    if (idx < 0) return ""
+    return String(root.seriesColors[idx] || "")
+  }
 
   function sliceColor(index, alpha) {
-    var hex = String(root.sliceColors[index] || "").replace(/[#\s]/g, "")
+    var hex = String(root.seriesColors[index] || "").replace(/[#\s]/g, "")
     if (hex.length >= 6) {
       var r = parseInt(hex.substr(0, 2), 16) / 255
       var g = parseInt(hex.substr(2, 2), 16) / 255
@@ -69,6 +94,13 @@ Panel {
     return Qt.rgba(root.activeColor.r, root.activeColor.g, root.activeColor.b, alpha)
   }
 
+  function colorForExercise(name, alpha) {
+    var idx = root.seriesIndex(name)
+    if (idx < 0)
+      return Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, alpha * 0.35)
+    return root.sliceColor(idx, alpha)
+  }
+
   function selectDay(key) {
     if (!key) return
     if (key === root.todayKey || root.selectedDayKey === key) root.selectedDayKey = ""
@@ -76,9 +108,11 @@ Panel {
   }
 
   function open() {
+    currentTab = "timer"
     selectedAction = 0
     cursorActive = true
     draftName = ""
+    selectedDayKey = ""
     tip = Tips.tipOfTheDay(Date.now())
     controller.show()
   }
@@ -181,24 +215,41 @@ Panel {
 
           Column {
             width: parent.width
-            spacing: Style.space(4)
+            spacing: Style.space(8)
 
-            Text {
+            Item {
               width: parent.width
-              text: root.timerService ? root.timerService.remainingText : "25:00"
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Math.round(Style.font.displayLarge * 1.4)
-              font.bold: true
-              horizontalAlignment: Text.AlignHCenter
+              height: Style.space(14)
+
+              Rectangle {
+                id: remainingTrack
+                anchors.fill: parent
+                radius: height / 2
+                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+              }
+
+              Rectangle {
+                anchors.left: remainingTrack.left
+                anchors.verticalCenter: remainingTrack.verticalCenter
+                height: remainingTrack.height
+                radius: remainingTrack.radius
+                color: root.activeColor
+                width: remainingTrack.width * (
+                  root.timerService
+                    ? Math.max(0, Math.min(1, 1 - Number(root.timerService.progress || 0)))
+                    : 1
+                )
+              }
             }
 
             Text {
               width: parent.width
-              text: root.timerService ? root.timerService.phaseLabel : "Work"
-              color: root.activeColor
+              text: (root.timerService ? root.timerService.remainingText : "45:00")
+                + "  "
+                + (root.timerService ? root.timerService.phaseLabel : "Work")
+              color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: Style.font.title
+              font.pixelSize: Style.font.body
               horizontalAlignment: Text.AlignHCenter
             }
           }
@@ -329,7 +380,7 @@ Panel {
             TextField {
               id: addField
               width: parent.width - addButton.width - parent.spacing
-              placeholderText: "Add a snack"
+              placeholderText: "Add exercise"
               text: root.draftName
               foreground: root.foreground
               accent: root.activeColor
@@ -368,7 +419,7 @@ Panel {
               DonutRing {
                 anchors.fill: parent
                 segments: root.donutSegments
-                colors: root.sliceColors
+                colors: root.donutColors
                 trackColor: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.1)
                 ringWidth: Style.space(14)
               }
@@ -445,7 +496,7 @@ Panel {
                       width: Style.space(7)
                       height: width
                       radius: width / 2
-                      color: root.sliceColor(index, 1.0)
+                      color: root.colorForExercise(modelData.name, 1.0)
                       anchors.left: parent.left
                       anchors.verticalCenter: parent.verticalCenter
                     }
@@ -497,13 +548,30 @@ Panel {
               Column {
                 required property var modelData
                 readonly property bool isActive: modelData.key === root.activeDayKey
+                readonly property var visualStacks: {
+                  var src = modelData.stacks || []
+                  var out = []
+                  for (var i = src.length - 1; i >= 0; i--) out.push(src[i])
+                  return out
+                }
                 width: (parent.width - parent.spacing * 6) / 7
-                spacing: Style.space(3)
+                spacing: Style.space(2)
+
+                Text {
+                  text: modelData.count > 0 ? String(modelData.count) : " "
+                  color: root.foreground
+                  opacity: modelData.count > 0 ? (isActive ? 1.0 : 0.7) : 0
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: isActive
+                  width: parent.width
+                  horizontalAlignment: Text.AlignHCenter
+                }
 
                 Item {
                   id: trendSlot
                   width: parent.width
-                  height: Style.space(42)
+                  height: root.weekBarHeight
 
                   MouseArea {
                     id: trendSlotMouse
@@ -514,16 +582,45 @@ Panel {
                   }
 
                   Rectangle {
+                    visible: !modelData.stacks || modelData.stacks.length === 0
                     width: parent.width * 0.42
+                    height: 3
                     radius: Style.space(2)
-                    color: isActive ? root.sliceColor(0, 1.0) : root.sliceColor(0, 0.28)
-                    opacity: trendSlotMouse.containsMouse && !isActive ? 0.5 : 1.0
+                    color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
-                    height: {
-                      if (modelData.count <= 0 || root.weekMax <= 0) return 3
-                      return Math.max(3, trendSlot.height * Number(modelData.count) / root.weekMax)
+                  }
+
+                  Column {
+                    visible: modelData.stacks && modelData.stacks.length > 0
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width * 0.42
+                    spacing: 0
+                    property real slotHeight: parent.height
+                    property real fillAlpha: isActive ? 1.0 : 0.72
+                    property bool dimHover: trendSlotMouse.containsMouse && !isActive
+
+                    Repeater {
+                      model: visualStacks
+
+                      Rectangle {
+                        required property var modelData
+                        width: parent.width
+                        height: root.weekMax > 0
+                          ? Math.max(1, parent.slotHeight * Number(modelData.count) / root.weekMax)
+                          : 1
+                        color: root.colorForExercise(modelData.name, parent.fillAlpha)
+                        opacity: parent.dimHover ? 0.85 : 1.0
+                      }
                     }
+                  }
+
+                  PanelToolTip {
+                    visible: trendSlotMouse.containsMouse
+                    delay: 150
+                    text: Model.formatStacksTooltip(modelData.stacks)
+                    fontFamily: root.fontFamily
                   }
                 }
 
@@ -553,7 +650,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.weekMax <= 0
-            text: "Bars fill in as you log snacks. Click a day to see its split."
+            text: "Hover a bar for the per-exercise counts. Click a day to see its split."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

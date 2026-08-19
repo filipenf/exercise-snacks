@@ -21,7 +21,7 @@ test("normalizeConfig clamps to the manifest ranges", () => {
     Model.normalizeConfig({ workMinutes: 200, snackSeconds: 1 }),
     { workMinutes: 120, snackSeconds: 15 }
   )
-  assert.deepEqual(Model.normalizeConfig({}), { workMinutes: 25, snackSeconds: 120 })
+  assert.deepEqual(Model.normalizeConfig({}), { workMinutes: 45, snackSeconds: 120 })
 })
 
 test("a new work interval counts down from the configured duration", () => {
@@ -185,19 +185,35 @@ test("weekTrend is seven days ending today, oldest first", () => {
   const now = Date.parse("2026-08-19T12:00:00")
   const todayKey = Model.dateKey(now)
   const yesterday = Model.prevDateKey(todayKey)
-  const trend = Model.weekTrend({
-    [yesterday]: { "Push-ups": 12 },
+  const days = {
+    [yesterday]: { "Push-ups": 12, "Air squats": 8 },
     [todayKey]: { "Air squats": 40 }
-  }, { date: todayKey, totals: { "Air squats": 40 } }, todayKey)
+  }
+  const today = { date: todayKey, totals: { "Air squats": 40 } }
+  const trend = Model.weekTrend(days, today, todayKey)
+  const series = Model.weekSeries(days, today, todayKey)
 
   assert.equal(trend.length, 7)
   assert.equal(trend[6].key, todayKey)
   assert.equal(trend[6].count, 40)
   assert.equal(trend[6].isToday, true)
+  assert.deepEqual(trend[6].stacks, [{ name: "Air squats", count: 40 }])
   assert.equal(trend[5].key, yesterday)
-  assert.equal(trend[5].count, 12)
+  assert.equal(trend[5].count, 20)
+  assert.deepEqual(trend[5].stacks, [
+    { name: "Air squats", count: 8 },
+    { name: "Push-ups", count: 12 }
+  ])
   assert.equal(trend[0].count, 0)
+  assert.deepEqual(trend[0].stacks, [])
+  assert.deepEqual(series.map((row) => row.name), ["Air squats", "Push-ups"])
+  assert.equal(series[0].count, 48)
   assert.equal(Model.weekdayLabel(todayKey).length, 3)
+  assert.equal(
+    Model.formatStacksTooltip(trend[5].stacks),
+    "Air squats 8\nPush-ups 12"
+  )
+  assert.equal(Model.formatStacksTooltip([]), "No snacks logged")
 })
 
 test("donut slices sort by count and fold the tail into Other", () => {

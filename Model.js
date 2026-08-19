@@ -8,7 +8,7 @@ var StatusPicking = "picking"
 var StatusLogging = "logging"
 var PhaseWork = "work"
 var PhaseSnack = "snack"
-var DefaultExercises = ["Push-ups", "Pull-ups", "Air squats"]
+var DefaultExercises = ["Push-up", "Air squat", "Plank", "Burpee"]
 var IdleResetSeconds = 120
 var HistoryKeepDays = 30
 var DonutMaxSlices = 6
@@ -44,7 +44,7 @@ function cloneArray(value) {
 function normalizeConfig(settings) {
   var values = settings || {}
   return {
-    workMinutes: boundedInteger(values.workMinutes, 25, 1, 120),
+    workMinutes: boundedInteger(values.workMinutes, 45, 1, 120),
     snackSeconds: boundedInteger(values.snackSeconds, 120, 15, 600)
   }
 }
@@ -486,20 +486,59 @@ function totalsForDay(days, today, key) {
   return history[key] ? cloneObject(history[key]) : {}
 }
 
-function weekTrend(days, today, todayKey) {
+function weekHistory(days, today, todayKey) {
   var key = todayKey || (today && today.date) || ""
   var history = normalizeDays(days)
   if (today && today.date && hasTotals(today.totals))
     history[today.date] = parseReps(today.totals)
-  var keys = weekKeys(key)
+  return { key: key, history: history, keys: weekKeys(key) }
+}
+
+function weekSeries(days, today, todayKey) {
+  var ctx = weekHistory(days, today, todayKey)
+  var combined = {}
+  for (var i = 0; i < ctx.keys.length; i++) {
+    var totals = ctx.history[ctx.keys[i]] || {}
+    for (var name in totals) {
+      combined[name] = (finiteNumber(combined[name], 0) || 0) + (Math.round(finiteNumber(totals[name], 0)) || 0)
+    }
+  }
+  return exerciseSlices(combined)
+}
+
+function stacksForDay(totals, series) {
+  var stacks = []
+  var source = totals || {}
+  var list = series || []
+  for (var i = 0; i < list.length; i++) {
+    var name = list[i].name
+    var count = Math.max(0, Math.round(finiteNumber(source[name], 0)) || 0)
+    if (count > 0) stacks.push({ name: name, count: count })
+  }
+  return stacks
+}
+
+function formatStacksTooltip(stacks) {
+  var list = stacks || []
+  if (!list.length) return "No snacks logged"
+  var parts = []
+  for (var i = 0; i < list.length; i++) parts.push(list[i].name + " " + list[i].count)
+  return parts.join("\n")
+}
+
+function weekTrend(days, today, todayKey) {
+  var ctx = weekHistory(days, today, todayKey)
+  var series = weekSeries(days, today, todayKey)
   var out = []
-  for (var i = 0; i < keys.length; i++) {
-    var day = keys[i]
+  for (var i = 0; i < ctx.keys.length; i++) {
+    var day = ctx.keys[i]
+    var totals = ctx.history[day] || {}
     out.push({
       key: day,
-      count: totalsSum(history[day]),
+      count: totalsSum(totals),
       label: weekdayLabel(day),
-      isToday: day === key
+      isToday: day === ctx.key,
+      stacks: stacksForDay(totals, series)
     })
   }
   return out
@@ -791,7 +830,9 @@ if (typeof module !== "undefined") {
     syncHistory: syncHistory,
     mergeHistory: mergeHistory,
     totalsForDay: totalsForDay,
+    weekSeries: weekSeries,
     weekTrend: weekTrend,
+    formatStacksTooltip: formatStacksTooltip,
     exerciseSlices: exerciseSlices,
     groupedExercises: groupedExercises,
     sliceColors: sliceColors,

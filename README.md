@@ -1,22 +1,25 @@
 # Exercise Snacks
 
-A work timer for the [Omarchy](https://omarchy.org/) bar. When the interval
-ends, a popup asks you to pick a snack — push-ups, pull-ups, air squats —
-then runs a two-minute timer and lets you log how many you did.
+A timer for the [Omarchy](https://omarchy.org/) bar that reminds you to do "exercise snacks". When the interval ends, a
+popup asks you to pick one or more exercises — push-up, air squats, plank, burpee — then runs a two-minute timer and
+lets you log how many you did.
 
-Today's totals stay on the Timer tab. The Stats tab has a donut of today's
-exercises and a seven-day history. The Learn tab has a tip of the day and
-links to Dr. Rhonda Patrick's FoundMyFitness posts on exercise snacks.
+The Stats tab has a donut of today's exercises and a seven-day history and the Learn tab has some useful information
+about the benefits of exercise snacks and links to Dr. Rhonda Patrick's posts on the subject
+
+<p align="center">
+  <img src="screenshots/timer.png" width="32%" alt="Timer tab"/>
+  <img src="screenshots/stats.png" width="32%" alt="Stats tab"/>
+  <img src="screenshots/learn.png" width="32%" alt="Learn tab"/>
+</p>
 
 ## Install
-
-From a published git repo:
 
 ```bash
 omarchy plugin add https://github.com/filipenf/exercise-snacks.git --enable
 ```
 
-From this folder, during development:
+For local development:
 
 ```bash
 PLUGIN_ID="filipenf.exercise-snacks"
@@ -30,36 +33,34 @@ omarchy plugin enable "$PLUGIN_ID" --section right
 
 ## Use
 
-The bar shows a flat flex icon in the same style as the other bar glyphs.
-Hover it for the remaining time; click it to open the panel. The work
-interval starts on its own — it is a break reminder, not a timer you have
-to start.
+Hover over the icon on the bar to see the remaining time, click it to open the panel. The work interval starts on its
+own and resets if your computer goes idle for more than two minutes
 
-If the computer is idle for more than two minutes, the work interval starts
-over when you come back. You already left the desk, so the snack can wait.
+| Control | Action                                       |
+| ------- | -------------------------------------------- |
+| Pause   | Pause or resume the current interval         |
+| Skip    | Snack now (or skip the current overlay step) |
 
-| Control | Action |
-| --- | --- |
-| Pause | Pause or resume the current interval |
-| Skip | Snack now (or skip the current overlay step) |
+When time is up you'll see a popup:
 
-When work ends, an overlay opens:
+  <img src="screenshots/picker.png" width="32%" alt="Exercise picker"/>
 
 1. Pick one or more snacks from your list
 2. Start the two-minute snack
 3. Enter how many reps you did, then Save
 
-Skip on the overlay starts the next work interval without logging. Escape
-does the same on pick and log; during the snack it jumps to logging so you
-can record an early finish.
+Skip on the overlay starts the next work interval without logging. 
 
-The Learn tab (`n` with the panel open; `t` returns to Timer, `s` opens
-Stats) has a rotating tip and links to FoundMyFitness. Those links open in
-the browser. The plugin does not fetch X.com.
+The Learn tab (`n` with the panel open; `t` returns to Timer, `s` opens Stats) has a rotating tip and links to
+FoundMyFitness. The links open in your browser, the plugin doesn't require network access
 
-Stats shows today's logged snacks as a donut (click a day in the week strip
-to inspect it) and total reps for the past seven days. Days before this
-update have no history.
+Stats shows today's logged snacks as a donut (click a day in the week strip to inspect it) and total reps for the past
+seven days. Days before this update have no history.
+
+  <img src="screenshots/stats.png" width="32%" alt="Stats tab"/>
+
+The exercise list is editable so you can add or delete snacks as you see fit. The default exercises are simple and
+require no equipment: push-up, air squats, plank, burpee
 
 ## Keyboard
 
@@ -73,14 +74,13 @@ With the panel open:
 ## Configure
 
 ```bash
-omarchy bar plugin set filipenf.exercise-snacks workMinutes 25 --json
+omarchy bar plugin set filipenf.exercise-snacks workMinutes 45 --json
 omarchy bar plugin set filipenf.exercise-snacks snackSeconds 120 --json
 ```
 
-New values apply to the next interval. Add or remove snacks on the Timer tab.
-The catalog, today's totals, and up to 30 days of history live in
-`~/.local/state/omarchy/exercise-snacks.json`. Today's log still resets at
-local midnight; previous days stay in `days`.
+New values apply to the next interval. Add or remove snacks on the Timer tab. The catalog, today's totals, and up to 30
+days of history live in `~/.local/state/omarchy/exercise-snacks.json`. Today's log still resets at local midnight;
+previous days stay in `days`.
 
 ## Update
 
