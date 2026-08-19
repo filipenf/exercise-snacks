@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "filipenf.exercise-snacks",
+  "name": "Exercise Snacks",
+  "version": "0.1.0",
+  "author": "filipenf",
+  "license": "MIT",
+  "description": "A work timer that prompts the user to do a two-minute exercise snack for a break",
+  "kinds": [
+    "service",
+    "bar-widget",
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml",
+    "overlay": "Overlay.qml"
+  },
+  "barWidget": {
+    "displayName": "Exercise Snacks",
+    "description": "Work timer with a two-minute exercise snack overlay and today's totals.",
+    "category": "Time",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "workMinutes": 25,
+      "snackSeconds": 120
+    },
+    "schema": [
+      {
+        "key": "workMinutes",
+        "type": "integer",
+        "label": "Work duration (minutes)",
+        "min": 1,
+        "max": 120,
+        "step": 1,
+        "defaultValue": 25
+      },
+      {
+        "key": "snackSeconds",
+        "type": "integer",
+        "label": "Snack duration (seconds)",
+        "min": 15,
+        "max": 600,
+        "step": 15,
+        "defaultValue": 120
+      }
+    ]
+  }
+}

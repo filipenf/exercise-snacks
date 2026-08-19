@@ -1,0 +1,159 @@
+const test = require("node:test")
+const assert = require("node:assert/strict")
+const Model = require("../Model.js")
+const Tips = require("../Tips.js")
+
+const config = Model.normalizeConfig({
+  workMinutes: 25,
+  snackSeconds: 120
+})
+
+test("idle longer than two minutes resets the work interval", () => {
+  assert.equal(Model.IdleResetSeconds, 120)
+})
+
+test("normalizeConfig clamps to the manifest ranges", () => {
+  assert.deepEqual(
+    Model.normalizeConfig({ workMinutes: 0, snackSeconds: 9999 }),
+    { workMinutes: 1, snackSeconds: 600 }
+  )
+  assert.deepEqual(
+    Model.normalizeConfig({ workMinutes: 200, snackSeconds: 1 }),
+    { workMinutes: 120, snackSeconds: 15 }
+  )
+  assert.deepEqual(Model.normalizeConfig({}), { workMinutes: 25, snackSeconds: 120 })
+})
+
+test("a new work interval counts down from the configured duration", () => {
+  const state = Model.startWork(config, 1000)
+  assert.equal(state.status, Model.StatusRunning)
+  assert.equal(state.phase, Model.PhaseWork)
+  assert.equal(state.deadlineMs, 1000 + 25 * 60 * 1000)
+  assert.equal(Model.remainingSeconds(state, 61 * 1000), 24 * 60)
+  assert.equal(Model.formatRemaining(Model.remainingSeconds(state, 61 * 1000)), "24:00")
+})
+
+test("pause freezes remaining time and resume continues from there", () => {
+  let state = Model.startWork(config, 0)
+  state = Model.pause(state, 60 * 1000)
+  assert.equal(state.status, Model.StatusPaused)
+  assert.equal(state.remainingSec, 24 * 60)
+  assert.equal(Model.remainingSeconds(state, 10 * 60 * 1000), 24 * 60)
+  state = Model.resume(state, 10 * 60 * 1000)
+  assert.equal(state.status, Model.StatusRunning)
+  assert.equal(state.deadlineMs, 10 * 60 * 1000 + 24 * 60 * 1000)
+})
+
+test("an expired work interval becomes picking", () => {
+  const running = Model.startWork(config, 0)
+  const recovered = Model.recoverInterrupted(running, config, 25 * 60 * 1000)
+  assert.equal(recovered.state.status, Model.StatusPicking)
+  assert.equal(recovered.notify, "pick")
+  assert.equal(Model.overlayStep(recovered.state.status, recovered.state.phase), "pick")
+  assert.equal(Model.overlayOpen(recovered.state.status, recovered.state.phase), true)
+  assert.equal(Model.barLabel(recovered.state.status, "00:00"), "SNACK")
+  assert.equal(Model.phaseLabel(recovered.state.status, recovered.state.phase), "Snack time")
+})
+
+test("starting a snack uses snackSeconds, then expiry becomes logging", () => {
+  const snack = Model.startSnack(config, 5000)
+  assert.equal(snack.phase, Model.PhaseSnack)
+  assert.equal(snack.phaseDurationSec, 120)
+  assert.equal(Model.overlayStep(snack.status, snack.phase), "snack")
+  const recovered = Model.recoverInterrupted(snack, config, 5000 + 120 * 1000)
+  assert.equal(recovered.state.status, Model.StatusLogging)
+  assert.equal(recovered.notify, "log")
+  assert.equal(Model.overlayStep(recovered.state.status, recovered.state.phase), "log")
+  assert.equal(Model.barLabel(recovered.state.status, "00:00"), "LOG")
+})
+
+test("a still-running snack survives a restart", () => {
+  const snack = Model.startSnack(config, 1000)
+  const recovered = Model.recoverInterrupted(snack, config, 31 * 1000)
+  assert.equal(recovered.state.status, Model.StatusRunning)
+  assert.equal(recovered.state.phase, Model.PhaseSnack)
+  assert.equal(Model.remainingSeconds(recovered.state, 31 * 1000), 90)
+  assert.equal(recovered.notify, "")
+})
+
+test("today rolls over at local midnight and merge adds reps", () => {
+  const morning = Date.parse("2026-08-18T09:00:00")
+  const nextDay = Date.parse("2026-08-19T09:00:00")
+  const started = Model.mergeTotals(null, { "Push-ups": 10 }, morning)
+  assert.equal(started.date, Model.dateKey(morning))
+  assert.equal(started.totals["Push-ups"], 10)
+
+  const added = Model.mergeTotals(started, { "Push-ups": 5, "Air squats": 20 }, morning)
+  assert.equal(added.totals["Push-ups"], 15)
+  assert.equal(added.totals["Air squats"], 20)
+  assert.equal(Model.formatTodayTotals(added), "Air squats 20 · Push-ups 15")
+
+  const rolled = Model.rollToday(added, nextDay)
+  assert.equal(rolled.date, Model.dateKey(nextDay))
+  assert.deepEqual(rolled.totals, {})
+  assert.equal(Model.formatTodayTotals(rolled), "No snacks logged today")
+})
+
+test("parseReps drops zeros and non-numbers", () => {
+  assert.deepEqual(Model.parseReps({ "Push-ups": 12, "Air squats": 0, junk: "nope" }), {
+    "Push-ups": 12
+  })
+})
+
+test("the catalog ignores blanks and duplicates, and never empties", () => {
+  assert.deepEqual(
+    Model.normalizeExercises([" Push-ups ", "push-ups", "", "Air squats"]),
+    ["Push-ups", "Air squats"]
+  )
+  assert.deepEqual(Model.addExercise(["Push-ups"], "  Pull-ups "), ["Push-ups", "Pull-ups"])
+  assert.deepEqual(Model.addExercise(["Push-ups"], "push-ups"), ["Push-ups"])
+  assert.deepEqual(Model.addExercise(["Push-ups"], "   "), ["Push-ups"])
+  assert.deepEqual(Model.removeExercise(["Push-ups", "Air squats"], "Push-ups"), ["Air squats"])
+  assert.deepEqual(Model.removeExercise(["Push-ups"], "Push-ups"), Model.DefaultExercises)
+})
+
+test("selection is a toggle against the catalog", () => {
+  const exercises = ["Push-ups", "Pull-ups", "Air squats"]
+  let selected = Model.toggleSelected([], exercises, "Air squats")
+  selected = Model.toggleSelected(selected, exercises, "Push-ups")
+  assert.deepEqual(selected, ["Air squats", "Push-ups"])
+  assert.equal(Model.isSelected(selected, "push-ups"), true)
+  selected = Model.toggleSelected(selected, exercises, "Air squats")
+  assert.deepEqual(selected, ["Push-ups"])
+  assert.deepEqual(Model.normalizeSelected(["Lunges", "Push-ups"], exercises), ["Push-ups"])
+})
+
+test("parseDocument restores timer, catalog, and today's log", () => {
+  const now = Date.parse("2026-08-18T12:00:00")
+  const parsed = Model.parseDocument({
+    version: 1,
+    exercises: ["Push-ups", "Lunges"],
+    selected: ["Lunges"],
+    today: { date: Model.dateKey(now), totals: { "Push-ups": 8 } },
+    timer: Model.startWork(config, now - 60 * 1000)
+  }, config, now)
+
+  assert.deepEqual(parsed.exercises, ["Push-ups", "Lunges"])
+  assert.deepEqual(parsed.selected, ["Lunges"])
+  assert.equal(parsed.today.totals["Push-ups"], 8)
+  assert.equal(parsed.timer.status, Model.StatusRunning)
+  assert.equal(parsed.notify, "")
+  assert.equal(Model.serializeDocument(parsed, now).version, 1)
+})
+
+test("tip of the day is stable for a local date and walks the list", () => {
+  const dayA = Date.parse("2026-08-18T08:00:00")
+  const laterSameDay = Date.parse("2026-08-18T23:00:00")
+  const dayB = Date.parse("2026-08-19T08:00:00")
+  const tipA = Tips.tipOfTheDay(dayA)
+  const tipLater = Tips.tipOfTheDay(laterSameDay)
+  const tipB = Tips.tipOfTheDay(dayB)
+  assert.equal(tipA.title, tipLater.title)
+  assert.equal(tipA.body, tipLater.body)
+  assert.ok(tipA.title.length > 0)
+  assert.ok(tipA.body.length > 0)
+  assert.equal(Tips.links().length, 4)
+  assert.ok(Tips.TIPS.length > 1)
+  const titles = new Set(Tips.TIPS.map((tip) => tip.title))
+  assert.ok(titles.has(tipB.title))
+})
