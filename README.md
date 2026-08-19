@@ -88,6 +88,19 @@ previous days stay in `days`.
 omarchy plugin update filipenf.exercise-snacks
 ```
 
+## Uninstall
+
+```bash
+omarchy plugin disable filipenf.exercise-snacks
+omarchy plugin remove filipenf.exercise-snacks
+```
+
+To also delete the log:
+
+```bash
+rm ~/.local/state/omarchy/exercise-snacks.json
+```
+
 ## Tests
 
 ```bash
