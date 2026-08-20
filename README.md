@@ -34,7 +34,7 @@ omarchy plugin enable "$PLUGIN_ID" --section right
 ## Use
 
 Hover over the icon on the bar to see the remaining time, click it to open the panel. The work interval starts on its
-own and resets if your computer goes idle for more than two minutes
+own and pauses if your computer goes idle for more than two minutes
 
 | Control | Action                                       |
 | ------- | -------------------------------------------- |

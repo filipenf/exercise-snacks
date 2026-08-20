@@ -33,7 +33,7 @@ Item {
   property bool initialized: false
   property bool stateDirReady: false
   property bool savePending: false
-  property bool idleResetPending: false
+  property bool pausedForIdle: false
   property string loadedStateText: ""
 
   readonly property string status: timerState.status || Model.StatusStopped
@@ -129,7 +129,7 @@ Item {
   }
 
   function togglePause() {
-    if (!initialized || idleResetPending || picking || logging) return
+    if (!initialized || pausedForIdle || picking || logging) return
     var now = Date.now()
     if (stopped) {
       setTimer(Model.startWork(config, now), true)
@@ -142,7 +142,7 @@ Item {
   }
 
   function skip() {
-    if (!initialized || idleResetPending) return
+    if (!initialized || pausedForIdle) return
     if (picking) skipPick()
     else if (logging) skipLog()
     else if (phase === Model.PhaseSnack) finishSnack()
@@ -222,20 +222,20 @@ Item {
   }
 
   function holdForIdle() {
-    idleResetPending = true
-    selected = []
-    setTimer(Model.stoppedState(config, Date.now()), true)
-    lastTickMs = Date.now()
-    syncOverlay()
+    if (!initialized) return
+    if (running) {
+      setTimer(Model.pause(timerState, Date.now()), true)
+      lastTickMs = Date.now()
+      pausedForIdle = true
+    }
   }
 
-  function resetAfterIdle() {
-    if (!idleResetPending) return
-    idleResetPending = false
-    selected = []
-    setTimer(Model.startWork(config, Date.now()), true)
+  function resumeAfterIdle() {
+    if (!pausedForIdle) return
+    pausedForIdle = false
+    if (!paused) return
+    setTimer(Model.resume(timerState, Date.now()), true)
     lastTickMs = Date.now()
-    syncOverlay()
   }
 
   function addExercise(name) {
@@ -250,7 +250,7 @@ Item {
   }
 
   function tick() {
-    if (!initialized || idleResetPending) return
+    if (!initialized || pausedForIdle) return
     var now = Date.now()
     nowMs = now
     if (!today || today.date !== Model.dateKey(now)) {
@@ -319,12 +319,12 @@ Item {
   Component.onCompleted: stateDirProcess.running = true
 
   IdleMonitor {
-    timeout: Model.IdleResetSeconds
+    timeout: Model.IdlePauseSeconds
     enabled: root.initialized
     respectInhibitors: true
     onIsIdleChanged: {
       if (isIdle) root.holdForIdle()
-      else root.resetAfterIdle()
+      else root.resumeAfterIdle()
     }
   }
 

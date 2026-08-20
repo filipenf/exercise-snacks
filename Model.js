@@ -9,7 +9,7 @@ var StatusLogging = "logging"
 var PhaseWork = "work"
 var PhaseSnack = "snack"
 var DefaultExercises = ["Push-up", "Air squat", "Plank", "Burpee"]
-var IdleResetSeconds = 120
+var IdlePauseSeconds = 120
 var HistoryKeepDays = 30
 var DonutMaxSlices = 6
 var DonutMinPct = 3
@@ -788,7 +788,7 @@ if (typeof module !== "undefined") {
     PhaseWork: PhaseWork,
     PhaseSnack: PhaseSnack,
     DefaultExercises: DefaultExercises,
-    IdleResetSeconds: IdleResetSeconds,
+    IdlePauseSeconds: IdlePauseSeconds,
     HistoryKeepDays: HistoryKeepDays,
     DonutMaxSlices: DonutMaxSlices,
     DonutMinPct: DonutMinPct,

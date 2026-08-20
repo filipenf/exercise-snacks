@@ -8,8 +8,8 @@ const config = Model.normalizeConfig({
   snackSeconds: 120
 })
 
-test("idle longer than two minutes resets the work interval", () => {
-  assert.equal(Model.IdleResetSeconds, 120)
+test("idle longer than two minutes pauses the current interval", () => {
+  assert.equal(Model.IdlePauseSeconds, 120)
 })
 
 test("normalizeConfig clamps to the manifest ranges", () => {
